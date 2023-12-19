@@ -4,6 +4,8 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from .models import Producto, Categoria, ProductosCategorias, MovimientosInventario
 import json
+from datetime import datetime
+from django.utils import timezone
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -24,7 +26,7 @@ class ProductosView(View):
             except Producto.DoesNotExist:
                 data = {"message": "Producto not found..."}
         else:
-            productos = Producto.objects.all()
+            productos = Producto.objects.all().order_by('-ProductoID')
             if productos:
                 data = {
                     "message": "Success",
@@ -67,23 +69,51 @@ class ProductosView(View):
         try:
             data = json.loads(request.body)
             producto = Producto.objects.get(ProductoID=producto_id)
-            producto.Nombre = data["nombre"]
-            producto.Precio = data["precio"]
-            producto.Stock = data["stock"]
-            producto.save()
-            data = {
-                "message": "Success",
-                "producto": {
-                    "id": producto.ProductoID,
-                    "nombre": producto.Nombre,
-                    "precio": str(producto.Precio),
-                    "stock": producto.Stock,
-                },
-            }
+            old_stock = producto.Stock  # Save the old stock for comparison
+            producto.Nombre = data['nombre']
+            producto.Precio = data['precio']
+            producto.Stock = data['stock'] 
+            nuevo_stock = data['stock']
+            # Verifica si el campo de stock ha sido modificado
+            if nuevo_stock != old_stock:
+                producto.Stock = nuevo_stock
+                producto.save()
+
+                # Calcula la diferencia en el stock
+                stock_difference = nuevo_stock - old_stock
+
+                # Crea una entrada de movimiento
+                movimiento_tipo = 'Entrada' if stock_difference > 0 else 'Salida'
+                movimiento_cantidad = abs(stock_difference)
+                fecha_movimiento = datetime.now()
+
+                movimiento = MovimientosInventario.objects.create(
+                    Producto=producto,
+                    Cantidad=movimiento_cantidad,
+                    FechaMovimiento=fecha_movimiento,
+                    TipoMovimiento=movimiento_tipo
+                )
+
+                data = {
+                    'message': 'Success',
+                    'producto': {
+                        'id': producto.ProductoID,
+                        'nombre': producto.Nombre,
+                        'precio': str(producto.Precio),
+                        'stock': producto.Stock
+                    },
+                    'movimiento': {
+                        'id': movimiento.MovimientoID,
+                        'producto_id': movimiento.Producto.ProductoID,
+                        'cantidad': movimiento.Cantidad,
+                        'fecha_movimiento': movimiento.FechaMovimiento,
+                        'tipo_movimiento': movimiento.TipoMovimiento
+                    }
+                }
         except Producto.DoesNotExist:
-            data = {"message": "Producto not found..."}
+            data = {'message': 'Producto not found...'}
         except Exception as e:
-            data = {"message": "Error", "error": str(e)}
+            data = {'message': 'Error', 'error': str(e)}
 
         return JsonResponse(data)
 
@@ -116,7 +146,7 @@ class CategoriasView(View):
             except Categoria.DoesNotExist:
                 data = {"message": "Categoria not found..."}
         else:
-            categorias = Categoria.objects.all()
+            categorias = Categoria.objects.all().order_by('-CategoriaID')
             if categorias:
                 data = {
                     "message": "Success",
@@ -193,9 +223,8 @@ class ProductosCategoriasView(View):
             except ProductosCategorias.DoesNotExist:
                 data = {"message": "ProductosCategorias not found..."}
         else:
-            productos_categorias = ProductosCategorias.objects.select_related(
-                "Producto", "Categoria"
-            ).all()
+            productos_categorias = ProductosCategorias.objects.all().order_by("-id")
+            
             if productos_categorias:
                 data = {
                     "message": "Success",
@@ -287,7 +316,7 @@ class MovimientosInventarioView(View):
     def get(self, request, movimiento_id=None):
         if movimiento_id:
             try:
-                movimiento = MovimientosInventario.objects.get(
+                movimiento = MovimientosInventario.objects.select_related('Producto').get(
                     MovimientoID=movimiento_id
                 )
                 data = {
@@ -295,6 +324,7 @@ class MovimientosInventarioView(View):
                     "movimiento": {
                         "id": movimiento.MovimientoID,
                         "producto_id": movimiento.Producto.ProductoID,
+                        "producto_nombre": movimiento.Producto.Nombre,  # Agregado el nombre del producto
                         "cantidad": movimiento.Cantidad,
                         "fecha_movimiento": movimiento.FechaMovimiento,
                         "tipo_movimiento": movimiento.TipoMovimiento,
@@ -303,7 +333,7 @@ class MovimientosInventarioView(View):
             except MovimientosInventario.DoesNotExist:
                 data = {"message": "Movimiento not found..."}
         else:
-            movimientos = MovimientosInventario.objects.all()
+            movimientos = MovimientosInventario.objects.select_related('Producto').all().order_by("-MovimientoID")
             if movimientos:
                 data = {
                     "message": "Success",
@@ -311,6 +341,7 @@ class MovimientosInventarioView(View):
                         {
                             "id": m.MovimientoID,
                             "producto_id": m.Producto.ProductoID,
+                            "producto_nombre": m.Producto.Nombre,  # Agregado el nombre del producto
                             "cantidad": m.Cantidad,
                             "fecha_movimiento": m.FechaMovimiento,
                             "tipo_movimiento": m.TipoMovimiento,
@@ -320,72 +351,10 @@ class MovimientosInventarioView(View):
                 }
             else:
                 data = {"message": "Movimientos not found..."}
-
+                
         return JsonResponse(data)
-
-    def post(self, request):
-        try:
-            data = json.loads(request.body)
-            producto_id = data["producto_id"]
-            cantidad = data["cantidad"]
-            fecha_movimiento = data["fecha_movimiento"]
-            tipo_movimiento = data["tipo_movimiento"]
-
-            producto = Producto.objects.get(ProductoID=producto_id)
-
-            movimiento = MovimientosInventario.objects.create(
-                Producto=producto,
-                Cantidad=cantidad,
-                FechaMovimiento=fecha_movimiento,
-                TipoMovimiento=tipo_movimiento,
-            )
-            data = {
-                "message": "Success",
-                "movimiento": {
-                    "id": movimiento.MovimientoID,
-                    "producto_id": movimiento.Producto.ProductoID,
-                    "cantidad": movimiento.Cantidad,
-                    "fecha_movimiento": movimiento.FechaMovimiento,
-                    "tipo_movimiento": movimiento.TipoMovimiento,
-                },
-            }
-        except (Producto.DoesNotExist, MovimientosInventario.DoesNotExist) as e:
-            data = {"message": "Error", "error": str(e)}
-
-        return JsonResponse(data)
-
-    def put(self, request, movimiento_id):
-        try:
-            data = json.loads(request.body)
-            producto_id = data["producto_id"]
-            cantidad = data["cantidad"]
-            fecha_movimiento = data["fecha_movimiento"]
-            tipo_movimiento = data["tipo_movimiento"]
-
-            producto = Producto.objects.get(ProductoID=producto_id)
-
-            movimiento = MovimientosInventario.objects.get(MovimientoID=movimiento_id)
-            movimiento.Producto = producto
-            movimiento.Cantidad = cantidad
-            movimiento.FechaMovimiento = fecha_movimiento
-            movimiento.TipoMovimiento = tipo_movimiento
-            movimiento.save()
-
-            data = {
-                "message": "Success",
-                "movimiento": {
-                    "id": movimiento.MovimientoID,
-                    "producto_id": movimiento.Producto.ProductoID,
-                    "cantidad": movimiento.Cantidad,
-                    "fecha_movimiento": movimiento.FechaMovimiento,
-                    "tipo_movimiento": movimiento.TipoMovimiento,
-                },
-            }
-        except (Producto.DoesNotExist, MovimientosInventario.DoesNotExist) as e:
-            data = {"message": "Error", "error": str(e)}
-
-        return JsonResponse(data)
-
+        
+                
     def delete(self, request, movimiento_id):
         try:
             movimiento = MovimientosInventario.objects.get(MovimientoID=movimiento_id)
