@@ -352,3 +352,15 @@ class MovimientosInventarioView(View):
                 data = {"message": "Movimientos not found..."}
 
         return JsonResponse(data)
+    
+    def delete(self, request, movimiento_id):
+        try:
+            movimiento = MovimientosInventario.objects.get(MovimientoID=movimiento_id)
+            movimiento.delete()
+            data = {'message': 'Success'}
+        except MovimientosInventario.DoesNotExist:
+            data = {'message': 'Movimiento not found...'}
+        except Exception as e:
+            data = {'message': 'Error', 'error': str(e)}
+
+        return JsonResponse(data)
