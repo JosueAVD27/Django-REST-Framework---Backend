@@ -110,6 +110,18 @@ class ProductosView(View):
                         'tipo_movimiento': movimiento.TipoMovimiento
                     }
                 }
+            else:
+                producto.save()
+                # Si no hubo cambios en el stock, solo devuelve la información del producto
+                data = {
+                    'message': 'Success',
+                    'producto': {
+                        'id': producto.ProductoID,
+                        'nombre': producto.Nombre,
+                        'precio': str(producto.Precio),
+                        'stock': producto.Stock
+                    }
+                }
         except Producto.DoesNotExist:
             data = {'message': 'Producto not found...'}
         except Exception as e:
